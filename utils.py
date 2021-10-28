@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, ConcatDataset
 
 
 from models_resnet import Resnet18_md, Resnet50_md, ResnetModel
-from data_loader import KittiLoader
+from new_dataloader import KittiLoader
 from transforms import image_transforms
 
 def to_device(input, device):
@@ -32,16 +32,18 @@ def get_model(model, input_channels=3, pretrained=False):
 
 
 def prepare_dataloader(data_directory, mode, augment_parameters,
-                       do_augmentation, batch_size, size, num_workers):
-    data_dirs = os.listdir(data_directory)
+                       do_augmentation, batch_size, size, num_workers,is_val):
+                       
+    #data_dirs = os.listdir(data_directory)
+    if mode == "train":
+        if is_val:
+            mode = "val"
     data_transform = image_transforms(
         mode=mode,
         augment_parameters=augment_parameters,
         do_augmentation=do_augmentation,
         size = size)
-    datasets = [KittiLoader(os.path.join(data_directory,
-                            data_dir), mode, transform=data_transform)
-                            for data_dir in data_dirs]
+    datasets = [KittiLoader(data_directory, mode, transform=data_transform)]
     dataset = ConcatDataset(datasets)
     n_img = len(dataset)
     print('Use a dataset with', n_img, 'images')
@@ -54,3 +56,5 @@ def prepare_dataloader(data_directory, mode, augment_parameters,
                             shuffle=False, num_workers=num_workers,
                             pin_memory=True)
     return n_img, loader
+
+#if __name

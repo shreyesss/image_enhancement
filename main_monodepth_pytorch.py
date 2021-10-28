@@ -3,12 +3,13 @@ import time
 import torch
 import numpy as np
 import torch.optim as optim
-
+import os
+import gc
 # custom modules
 
 from loss import MonodepthLoss
 from utils import get_model, to_device, prepare_dataloader
-
+from metrics import compute_metrics
 # plot params
 
 import matplotlib.pyplot as plt
@@ -16,36 +17,39 @@ import matplotlib as mpl
 mpl.rcParams['figure.figsize'] = (15, 10)
 
 
+from tensorboardX import SummaryWriter
+
+
 def return_arguments():
     parser = argparse.ArgumentParser(description='PyTorch Monodepth')
 
-    parser.add_argument('data_dir',
+    parser.add_argument('--data_dir',
                         help='path to the dataset folder. \
                         It should contain subfolders with following structure:\
                         "image_02/data" for left images and \
-                        "image_03/data" for right images'
+                        "image_03/data" for right images', default = "/media/shreyas/low_light/"
                         )
-    parser.add_argument('val_data_dir',
+    parser.add_argument('--val_data_dir',
                         help='path to the validation dataset folder. \
                             It should contain subfolders with following structure:\
                             "image_02/data" for left images and \
-                            "image_03/data" for right images'
+                            "image_03/data" for right images',default = "/media/shreyas/low_light_kitti2015/"
                         )
-    parser.add_argument('model_path', help='path to the trained model')
-    parser.add_argument('output_directory',
+    parser.add_argument('--model_path', help='path to the trained model',default="./checkpoints/low_stereo/stereo.pth")
+    parser.add_argument('--output_directory',
                         help='where save dispairities\
                         for tested images'
-                        )
+                        ,default=None)
     parser.add_argument('--input_height', type=int, help='input height',
                         default=256)
     parser.add_argument('--input_width', type=int, help='input width',
                         default=512)
-    parser.add_argument('--model', default='resnet18_md',
+    parser.add_argument('--model', default='resnet50',
                         help='encoder architecture: ' +
                         'resnet18_md or resnet50_md ' + '(default: resnet18)'
                         + 'or torchvision version of any resnet model'
                         )
-    parser.add_argument('--pretrained', default=False,
+    parser.add_argument('--pretrained', default=True,
                         help='Use weights of pretrained model'
                         )
     parser.add_argument('--mode', default='train',
@@ -54,7 +58,7 @@ def return_arguments():
                         help='number of total epochs to run')
     parser.add_argument('--learning_rate', default=1e-4,
                         help='initial learning rate (default: 1e-4)')
-    parser.add_argument('--batch_size', default=256,
+    parser.add_argument('--batch_size', default=8,
                         help='mini-batch size (default: 256)')
     parser.add_argument('--adjust_lr', default=True,
                         help='apply learning rate decay or not\
@@ -83,11 +87,15 @@ def return_arguments():
                         )
     parser.add_argument('--print_weights', default=False,
                         help='print weights of every layer')
-    parser.add_argument('--input_channels', default=3,
+    parser.add_argument('--input_channels', default=6,
                         help='Number of channels in input tensor')
     parser.add_argument('--num_workers', default=4,
                         help='Number of workers in dataloader')
+                        
+    parser.add_argument('--logdir', default="./checkpoints/low_stereo",
+                        help='tensorboard directory logs')
     parser.add_argument('--use_multiple_gpu', default=False)
+    parser.add_argument('--do_stereo', default=True)
     args = parser.parse_args()
     return args
 
@@ -122,6 +130,10 @@ class Model:
     def __init__(self, args):
         self.args = args
 
+        os.makedirs(args.logdir, exist_ok=True)
+        # create summary logger
+        print("creating new summary file")
+        self.logger = SummaryWriter(args.logdir)
         # Set up model
         self.device = args.device
         self.model = get_model(args.model, input_channels=args.input_channels, pretrained=args.pretrained)
@@ -140,7 +152,7 @@ class Model:
                                                                  args.augment_parameters,
                                                                  False, args.batch_size,
                                                                  (args.input_height, args.input_width),
-                                                                 args.num_workers)
+                                                                 args.num_workers,True)
         else:
             self.model.load_state_dict(torch.load(args.model_path))
             args.augment_parameters = None
@@ -155,7 +167,7 @@ class Model:
         self.n_img, self.loader = prepare_dataloader(args.data_dir, args.mode, args.augment_parameters,
                                                      args.do_augmentation, args.batch_size,
                                                      (args.input_height, args.input_width),
-                                                     args.num_workers)
+                                                     args.num_workers,False)
 
 
         if 'cuda' in self.device:
@@ -169,102 +181,102 @@ class Model:
         best_val_loss = float('Inf')
 
         running_val_loss = 0.0
-        self.model.eval()
-        for data in self.val_loader:
-            data = to_device(data, self.device)
-            left = data['left_image']
-            right = data['right_image']
-            disps = self.model(left)
-            loss = self.loss_function(disps, [left, right])
-            val_losses.append(loss.item())
-            running_val_loss += loss.item()
 
-        running_val_loss /= self.val_n_img / self.args.batch_size
-        print('Val_loss:', running_val_loss)
 
         for epoch in range(self.args.epochs):
+
+            
+            ##log val metrics
             if self.args.adjust_lr:
                 adjust_learning_rate(self.optimizer, epoch,
                                      self.args.learning_rate)
             c_time = time.time()
             running_loss = 0.0
             self.model.train()
-            for data in self.loader:
+            for batch_idx, data in enumerate(self.loader):
+                global_step = epoch * len(self.loader) + batch_idx
                 # Load data
                 data = to_device(data, self.device)
                 left = data['left_image']
                 right = data['right_image']
+                print(left.shape)
 
                 # One optimization iteration
                 self.optimizer.zero_grad()
-                disps = self.model(left)
+
+                if self.args.do_stereo == True:
+                    input_ = torch.cat((left,right),dim=1)
+                else:
+                    input_ = left 
+                disps = self.model(input_)
                 loss = self.loss_function(disps, [left, right])
                 loss.backward()
                 self.optimizer.step()
                 losses.append(loss.item())
-
-                # Print statistics
-                if self.args.print_weights:
-                    j = 1
-                    for (name, parameter) in self.model.named_parameters():
-                        if name.split(sep='.')[-1] == 'weight':
-                            plt.subplot(5, 9, j)
-                            plt.hist(parameter.data.view(-1))
-                            plt.xlim([-1, 1])
-                            plt.title(name.split(sep='.')[0])
-                            j += 1
-                    plt.show()
-
-                if self.args.print_images:
-                    print('disp_left_est[0]')
-                    plt.imshow(np.squeeze(
-                        np.transpose(self.loss_function.disp_left_est[0][0,
-                                     :, :, :].cpu().detach().numpy(),
-                                     (1, 2, 0))))
-                    plt.show()
-                    print('left_est[0]')
-                    plt.imshow(np.transpose(self.loss_function\
-                        .left_est[0][0, :, :, :].cpu().detach().numpy(),
-                        (1, 2, 0)))
-                    plt.show()
-                    print('disp_right_est[0]')
-                    plt.imshow(np.squeeze(
-                        np.transpose(self.loss_function.disp_right_est[0][0,
-                                     :, :, :].cpu().detach().numpy(),
-                                     (1, 2, 0))))
-                    plt.show()
-                    print('right_est[0]')
-                    plt.imshow(np.transpose(self.loss_function.right_est[0][0,
-                               :, :, :].cpu().detach().numpy(), (1, 2,
-                               0)))
-                    plt.show()
+                print("loss this batch:", loss.item())
                 running_loss += loss.item()
 
+                del disps,data
+                # log train metrics during steps -- train_iter
+                self.logger.add_scalar("train_batch_loss/train_iter", loss.item(), global_step)
+            
+            gc.collect()
+            # Estimate loss per image
+            # log train_epohs wise metrics
+
+
             running_val_loss = 0.0
-            self.model.eval()
+            #self.model.eval()
+            running_metrics = {}
+            running_metrics["d1_all"] = 0
+            running_metrics["abs_rel"] = 0
+            running_metrics["sq_rel"] = 0
+            running_metrics["rms"] = 0 
+            running_metrics["log_rms"] = 0
+            running_metrics["a1"] = 0
+            running_metrics["a2"] = 0
+            running_metrics["a3"] = 0
+            running_metrics["N"] = 0
             for data in self.val_loader:
                 data = to_device(data, self.device)
                 left = data['left_image']
                 right = data['right_image']
-                disps = self.model(left)
+                gt = data["ground_truth"]
+                if self.args.do_stereo == True:
+                    input_ = torch.cat((left,right),dim=1)
+                else:
+                    input_ = left 
+                disps = self.model(input_)
                 loss = self.loss_function(disps, [left, right])
+                metrics = compute_metrics(disps[0].detach().cpu().numpy(),gt.detach().cpu().numpy())
                 val_losses.append(loss.item())
                 running_val_loss += loss.item()
+                for key,val in enumerate(metrics):
+                    #print(key,val)
+                    running_metrics[val] = running_metrics[val] + metrics[val]
 
-            # Estimate loss per image
-            running_loss /= self.n_img / self.args.batch_size
+            running_N = running_metrics["N"]
+            for key,val in enumerate(running_metrics):
+                running_metrics[val] = running_metrics[val]/running_N
+
             running_val_loss /= self.val_n_img / self.args.batch_size
+            self.logger.add_scalar("Validation_metrics/val_loss", running_val_loss, epoch)
+
+            for key,value in enumerate(running_metrics):
+                self.logger.add_scalar("Validation_metrics/{}".format(value), running_metrics[value], epoch)
+
+            running_loss /= self.n_img / self.args.batch_size
+            self.logger.add_scalar("Avg_epoch_loss/train_epoch", running_loss, epoch)
             print (
                 'Epoch:',
                 epoch + 1,
                 'train_loss:',
                 running_loss,
-                'val_loss:',
-                running_val_loss,
                 'time:',
                 round(time.time() - c_time, 3),
                 's',
                 )
+            
             self.save(self.args.model_path[:-4] + '_last.pth')
             if running_val_loss < best_val_loss:
                 self.save(self.args.model_path[:-4] + '_cpt.pth')
@@ -308,7 +320,7 @@ class Model:
 
 
 def main(args):
-    args = return_arguments()
+    
     if args.mode == 'train':
         model = Model(args)
         model.train()
@@ -318,5 +330,6 @@ def main(args):
 
 
 if __name__ == '__main__':
-    main()
+    args = return_arguments()
+    main(args)
 

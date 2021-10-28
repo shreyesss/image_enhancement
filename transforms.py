@@ -10,14 +10,22 @@ def image_transforms(mode='train', augment_parameters=[0.8, 1.2, 0.5, 2.0, 0.8, 
         data_transform = transforms.Compose([
             ResizeImage(train=True, size=size),
             RandomFlip(do_augmentation),
-            ToTensor(train=True),
+            ToTensor(mode),
             AugmentImagePair(augment_parameters, do_augmentation)
         ])
         return data_transform
+
+    elif mode == 'val':
+        #print("yes")
+        data_transform = transforms.Compose([ResizeImage(train=True, size=size),
+            ToTensor(mode)
+        ])
+        return data_transform
+
     elif mode == 'test':
         data_transform = transforms.Compose([
             ResizeImage(train=False, size=size),
-            ToTensor(train=False),
+            ToTensor(mode),
             DoTest(),
         ])
         return data_transform
@@ -39,7 +47,8 @@ class ResizeImage(object):
             right_image = sample['right_image']
             new_right_image = self.transform(right_image)
             new_left_image = self.transform(left_image)
-            sample = {'left_image': new_left_image, 'right_image': new_right_image}
+            sample ['left_image'] =  new_left_image
+            sample['right_image'] = new_right_image
         else:
             left_image = sample
             new_left_image = self.transform(left_image)
@@ -54,18 +63,29 @@ class DoTest(object):
 
 
 class ToTensor(object):
-    def __init__(self, train):
-        self.train = train
+    def __init__(self, mode):
+        self.mode = mode
         self.transform = transforms.ToTensor()
 
     def __call__(self, sample):
-        if self.train:
+        if self.mode == "train":
             left_image = sample['left_image']
             right_image = sample['right_image']
             new_right_image = self.transform(right_image)
             new_left_image = self.transform(left_image)
             sample = {'left_image': new_left_image,
                       'right_image': new_right_image}
+        elif self.mode =="val":
+            left_image = sample['left_image']
+            right_image = sample['right_image']
+            gt = sample["ground_truth"]
+            #print("in to tensor")
+            new_right_image = self.transform(right_image)
+            new_left_image = self.transform(left_image)
+            new_gt = self.transform(gt)
+            sample = {'left_image': new_left_image,
+                      'right_image': new_right_image,
+                      "ground_truth":new_gt/256.0}
         else:
             left_image = sample
             sample = self.transform(left_image)
