@@ -123,8 +123,8 @@ class upconv(nn.Module):
 class get_disp(nn.Module):
     def __init__(self, num_in_layers):
         super(get_disp, self).__init__()
-        self.conv1 = nn.Conv2d(num_in_layers, 2, kernel_size=3, stride=1)
-        self.normalize = nn.BatchNorm2d(2)
+        self.conv1 = nn.Conv2d(num_in_layers, 6, kernel_size=3, stride=1)
+        self.normalize = nn.BatchNorm2d(6)
         self.sigmoid = torch.nn.Sigmoid()
 
     def forward(self, x):
@@ -349,24 +349,27 @@ class ResnetModel(nn.Module):
         # decoder
         self.upconv6 = upconv(filters[3], 512, 3, 2)
         self.iconv6 = conv(filters[2] + 512, 512, 3, 1)
+   
 
         self.upconv5 = upconv(512, 256, 3, 2)
         self.iconv5 = conv(filters[1] + 256, 256, 3, 1)
+  
+
 
         self.upconv4 = upconv(256, 128, 3, 2)
         self.iconv4 = conv(filters[0] + 128, 128, 3, 1)
         self.disp4_layer = get_disp(128)
 
         self.upconv3 = upconv(128, 64, 3, 1) #
-        self.iconv3 = conv(64 + 64 + 2, 64, 3, 1)
+        self.iconv3 = conv(64 + 64 + 6, 64, 3, 1)
         self.disp3_layer = get_disp(64)
 
         self.upconv2 = upconv(64, 32, 3, 2)
-        self.iconv2 = conv(64 + 32 + 2, 32, 3, 1)
+        self.iconv2 = conv(64 + 32 + 6, 32, 3, 1)
         self.disp2_layer = get_disp(32)
 
         self.upconv1 = upconv(32, 16, 3, 2)
-        self.iconv1 = conv(16 + 2, 16, 3, 1)
+        self.iconv1 = conv(16 + 6, 16, 3, 1)
         self.disp1_layer = get_disp(16)
 
         for m in self.modules():
@@ -422,4 +425,4 @@ class ResnetModel(nn.Module):
         concat1 = torch.cat((upconv1, self.udisp2), 1)
         iconv1 = self.iconv1(concat1)
         self.disp1 = self.disp1_layer(iconv1)
-        return self.disp1, self.disp2, self.disp3, self.disp4
+        return self.disp1 #, self.disp2, self.disp3, self.disp4

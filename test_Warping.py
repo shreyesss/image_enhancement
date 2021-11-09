@@ -35,7 +35,7 @@ def return_arguments():
                             "image_02/data" for left images and \
                             "image_03/data" for right images',default = "/media/shreyas/low_light_kitti2015/"
                         )
-    parser.add_argument('--model_path', help='path to the trained model',default="./checkpoints/low_stereo/stereo.pth")
+    parser.add_argument('--model_path', help='path to the trained model',default="./checkpoints/low_stereo/stereo_cpt.pth")
     parser.add_argument('--output_directory',
                         help='where save dispairities\
                         for tested images'
@@ -52,13 +52,13 @@ def return_arguments():
     parser.add_argument('--pretrained', default=True,
                         help='Use weights of pretrained model'
                         )
-    parser.add_argument('--mode', default='train',
+    parser.add_argument('--mode', default='test',
                         help='mode: train or test (default: train)')
     parser.add_argument('--epochs', default=50,
                         help='number of total epochs to run')
     parser.add_argument('--learning_rate', default=1e-4,
                         help='initial learning rate (default: 1e-4)')
-    parser.add_argument('--batch_size', default=16,
+    parser.add_argument('--batch_size', default=8,
                         help='mini-batch size (default: 256)')
     parser.add_argument('--adjust_lr', default=True,
                         help='apply learning rate decay or not\
@@ -89,10 +89,10 @@ def return_arguments():
                         help='print weights of every layer')
     parser.add_argument('--input_channels', default=6,
                         help='Number of channels in input tensor')
-    parser.add_argument('--num_workers', default=2,
+    parser.add_argument('--num_workers', default=4,
                         help='Number of workers in dataloader')
                         
-    parser.add_argument('--logdir', default="./checkpoints/image_enhancement",
+    parser.add_argument('--logdir', default="./checkpoints/low_stereo",
                         help='tensorboard directory logs')
     parser.add_argument('--use_multiple_gpu', default=False)
     parser.add_argument('--do_stereo', default=True)
@@ -142,7 +142,10 @@ class Model:
             self.model = torch.nn.DataParallel(self.model)
 
         if args.mode == 'train':
-            self.loss_function = MonodepthLoss(do_stereo=args.do_stereo).to(self.device)
+            self.loss_function = MonodepthLoss(
+                n=4,
+                SSIM_w=0.85,
+                disp_gradient_w=0.1, lr_w=1).to(self.device)
             self.optimizer = optim.Adam(self.model.parameters(),
                                         lr=args.learning_rate)
             self.val_n_img, self.val_loader = prepare_dataloader(args.val_data_dir, args.mode,
@@ -194,9 +197,9 @@ class Model:
                 global_step = epoch * len(self.loader) + batch_idx
                 # Load data
                 data = to_device(data, self.device)
-                left = data['left_image_low']
-                right = data['right_image_low']
-                # print(left.shape)
+                left = data['left_image']
+                right = data['right_image']
+                print(left.shape)
 
                 # One optimization iteration
                 self.optimizer.zero_grad()
@@ -205,15 +208,15 @@ class Model:
                     input_ = torch.cat((left,right),dim=1)
                 else:
                     input_ = left 
-                outputs = self.model(input_)
-                loss = self.loss_function(input_,outputs)
+                disps = self.model(input_)
+                loss = self.loss_function(disps, [left, right])
                 loss.backward()
                 self.optimizer.step()
                 losses.append(loss.item())
                 print("loss this batch:", loss.item())
                 running_loss += loss.item()
 
-                del data
+                del disps,data
                 # log train metrics during steps -- train_iter
                 self.logger.add_scalar("train_batch_loss/train_iter", loss.item(), global_step)
             
@@ -225,68 +228,55 @@ class Model:
             running_val_loss = 0.0
             #self.model.eval()
             running_metrics = {}
-            running_metrics["SSIM"] = 0
-            running_metrics["PSNR"] = 0
+            running_metrics["d1_all"] = 0
+            running_metrics["abs_rel"] = 0
+            running_metrics["sq_rel"] = 0
+            running_metrics["rms"] = 0 
+            running_metrics["log_rms"] = 0
+            running_metrics["a1"] = 0
+            running_metrics["a2"] = 0
+            running_metrics["a3"] = 0
             running_metrics["N"] = 0
-            with torch.no_grad():
-                self.model.eval()
-                for data in self.val_loader:
-                    data = to_device(data, self.device)
-                    left = data['left_image_low']
-                    right = data['right_image_low']
-                    gt_left = data['left_image_high']
-                    gt_right = data['left_image_high']
-                    if self.args.do_stereo == True:
-                        input_ = torch.cat((left,right),dim=1)
-                        gt_ = torch.cat((gt_left,gt_right),dim=1)
-                    else:
-                        input_ = left 
-                    outputs = self.model(input_)
-                    loss = self.loss_function(input_,outputs)
-                    metrics = compute_metrics(outputs,gt_)
-                    val_losses.append(loss.item())
-                    running_val_loss += loss.item()
-                    for key,val in enumerate(metrics):
-                        #print(key,val)
-                        running_metrics[val] = running_metrics[val] + metrics[val]
+            for data in self.val_loader:
+                data = to_device(data, self.device)
+                left = data['left_image']
+                right = data['right_image']
+                gt = data["ground_truth"]
+                if self.args.do_stereo == True:
+                    input_ = torch.cat((left,right),dim=1)
+                else:
+                    input_ = left 
+                disps = self.model(input_)
+                loss = self.loss_function(disps, [left, right])
+                metrics = compute_metrics(disps[0].detach().cpu().numpy(),gt.detach().cpu().numpy())
+                val_losses.append(loss.item())
+                running_val_loss += loss.item()
+                for key,val in enumerate(metrics):
+                    #print(key,val)
+                    running_metrics[val] = running_metrics[val] + metrics[val]
 
-                running_N = running_metrics["N"]
-                for key,val in enumerate(running_metrics):
-                    running_metrics[val] = running_metrics[val]/running_N
+            running_N = running_metrics["N"]
+            for key,val in enumerate(running_metrics):
+                running_metrics[val] = running_metrics[val]/running_N
 
-                running_val_loss /= self.val_n_img / self.args.batch_size
-                self.logger.add_scalar("Validation_metrics/val_loss", running_val_loss, epoch)
-    
+            running_val_loss /= self.val_n_img / self.args.batch_size
+            self.logger.add_scalar("Validation_metrics/val_loss", running_val_loss, epoch)
 
-                for key,value in enumerate(running_metrics):
-                    self.logger.add_scalar("Validation_metrics/{}".format(value), running_metrics[value], epoch)
+            for key,value in enumerate(running_metrics):
+                self.logger.add_scalar("Validation_metrics/{}".format(value), running_metrics[value], epoch)
 
-                running_loss /= self.n_img / self.args.batch_size
-                self.logger.add_scalar("Avg_epoch_loss/train_epoch", running_loss, epoch)
-                print(outputs.shape)
-                print(left.shape)
-                print(right.shape)
-                
-                self.logger.add_image("Visuals/left_gt" , gt_left[0] , epoch)
-                self.logger.add_image("Visuals/right_gt" , gt_right[0] , epoch)
-                self.logger.add_image("Visuals/left" , outputs[0,:3] , epoch)
-                self.logger.add_image("Visuals/right" , outputs[0,3:] , epoch)
-                self.logger.add_image("Visuals2/left_gt" , gt_left[1] , epoch)
-                self.logger.add_image("Visuals2/right_gt" , gt_right[1] , epoch)
-                self.logger.add_image("Visuals2/left" , outputs[1,:3] , epoch)
-                self.logger.add_image("Visuals2/right" , outputs[1,3:] , epoch)
-                print (
-                    'Epoch:',
-                    epoch + 1,
-                    'train_loss:',
-                    running_loss,
-                    'val_loss:',
-                    running_val_loss,
-                    'time:',
-                    round(time.time() - c_time, 3),
-                    's',
-                    )
-                
+            running_loss /= self.n_img / self.args.batch_size
+            self.logger.add_scalar("Avg_epoch_loss/train_epoch", running_loss, epoch)
+            print (
+                'Epoch:',
+                epoch + 1,
+                'train_loss:',
+                running_loss,
+                'time:',
+                round(time.time() - c_time, 3),
+                's',
+                )
+            
             self.save(self.args.model_path[:-4] + '_last.pth')
             if running_val_loss < best_val_loss:
                 self.save(self.args.model_path[:-4] + '_cpt.pth')
@@ -307,24 +297,25 @@ class Model:
         disparities = np.zeros((self.n_img,
                                self.input_height, self.input_width),
                                dtype=np.float32)
-        disparities_pp = np.zeros((self.n_img,
-                                  self.input_height, self.input_width),
-                                  dtype=np.float32)
+        #disparities_pp = np.zeros((self.n_img,
+        #                          self.input_height, self.input_width),
+        #                          dtype=np.float32)
         with torch.no_grad():
             for (i, data) in enumerate(self.loader):
                 # Get the inputs
                 data = to_device(data, self.device)
+                
                 left = data.squeeze()
                 # Do a forward pass
                 disps = self.model(left)
                 disp = disps[0][:, 0, :, :].unsqueeze(1)
                 disparities[i] = disp[0].squeeze().cpu().numpy()
-                disparities_pp[i] = \
-                    post_process_disparity(disps[0][:, 0, :, :]\
-                                           .cpu().numpy())
+                #disparities_pp[i] = \
+                #    post_process_disparity(disps[0][:, 0, :, :]\
+                #                           .cpu().numpy())
 
-        np.save(self.output_directory + '/disparities.npy', disparities)
-        np.save(self.output_directory + '/disparities_pp.npy',
+        #np.save(self.output_directory + '/disparities.npy', disparities)
+        #np.save(self.output_directory + '/disparities_pp.npy',
                 disparities_pp)
         print('Finished Testing')
 

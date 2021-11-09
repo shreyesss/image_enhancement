@@ -11,7 +11,6 @@ def image_transforms(mode='train', augment_parameters=[0.8, 1.2, 0.5, 2.0, 0.8, 
             ResizeImage(train=True, size=size),
             RandomFlip(do_augmentation),
             ToTensor(mode),
-            AugmentImagePair(augment_parameters, do_augmentation)
         ])
         return data_transform
 
@@ -24,10 +23,9 @@ def image_transforms(mode='train', augment_parameters=[0.8, 1.2, 0.5, 2.0, 0.8, 
 
     elif mode == 'test':
         data_transform = transforms.Compose([
-            ResizeImage(train=False, size=size),
-            ToTensor(mode),
-            DoTest(),
-        ])
+            ResizeImage(train=True, size=size),
+            ToTensor(mode),           
+        ]) # if post processing needed  pass Dotest() parameter
         return data_transform
     elif mode == 'custom':
         data_transform = transforms.Compose(transformations)
@@ -43,12 +41,16 @@ class ResizeImage(object):
 
     def __call__(self, sample):
         if self.train:
-            left_image = sample['left_image']
-            right_image = sample['right_image']
-            new_right_image = self.transform(right_image)
-            new_left_image = self.transform(left_image)
-            sample ['left_image'] =  new_left_image
-            sample['right_image'] = new_right_image
+            left_image_low = sample['left_image_low']
+            right_image_low = sample['right_image_low']
+            left_image_high = sample['left_image_high']
+            right_image_high = sample['right_image_high']
+            right_image_low = self.transform(right_image_low)
+            left_image_low = self.transform(left_image_low)
+            right_image_high = self.transform(right_image_high)
+            left_image_high = self.transform(left_image_high)
+            sample = {'left_image_low': left_image_low, 'right_image_low': right_image_low ,
+                      'left_image_high' : left_image_high , 'right_image_high' : right_image_high}
         else:
             left_image = sample
             new_left_image = self.transform(left_image)
@@ -69,23 +71,27 @@ class ToTensor(object):
 
     def __call__(self, sample):
         if self.mode == "train":
-            left_image = sample['left_image']
-            right_image = sample['right_image']
-            new_right_image = self.transform(right_image)
-            new_left_image = self.transform(left_image)
-            sample = {'left_image': new_left_image,
-                      'right_image': new_right_image}
-        elif self.mode =="val":
-            left_image = sample['left_image']
-            right_image = sample['right_image']
-            gt = sample["ground_truth"]
-            #print("in to tensor")
-            new_right_image = self.transform(right_image)
-            new_left_image = self.transform(left_image)
-            new_gt = self.transform(gt)
-            sample = {'left_image': new_left_image,
-                      'right_image': new_right_image,
-                      "ground_truth":new_gt/256.0}
+            left_image_low = sample['left_image_low']
+            right_image_low = sample['right_image_low']
+            left_image_high = sample['left_image_high']
+            right_image_high = sample['right_image_high']
+            right_image_low = self.transform(right_image_low)
+            left_image_low = self.transform(left_image_low)
+            right_image_high = self.transform(right_image_high)
+            left_image_high = self.transform(left_image_high)
+            sample = {'left_image_low': left_image_low, 'right_image_low': right_image_low ,
+                      'left_image_high' : left_image_high , 'right_image_high' : right_image_high}
+        elif self.mode =="val" or self.mod =="test":
+            left_image_low = sample['left_image_low']
+            right_image_low = sample['right_image_low']
+            left_image_high = sample['left_image_high']
+            right_image_high = sample['right_image_high']
+            right_image_low = self.transform(right_image_low)
+            left_image_low = self.transform(left_image_low)
+            right_image_high = self.transform(right_image_high)
+            left_image_high = self.transform(left_image_high)
+            sample = {'left_image_low': left_image_low, 'right_image_low': right_image_low ,
+                      'left_image_high' : left_image_high , 'right_image_high' : right_image_high}
         else:
             left_image = sample
             sample = self.transform(left_image)
@@ -98,57 +104,63 @@ class RandomFlip(object):
         self.do_augmentation = do_augmentation
 
     def __call__(self, sample):
-        left_image = sample['left_image']
-        right_image = sample['right_image']
+        left_image_low = sample['left_image_low']
+        right_image_low = sample['right_image_low']
+        left_image_high = sample['left_image_high']
+        right_image_high = sample['right_image_high']
         k = np.random.uniform(0, 1, 1)
         if self.do_augmentation:
             if k > 0.5:
-                fliped_left = self.transform(right_image)
-                fliped_right = self.transform(left_image)
-                sample = {'left_image': fliped_left, 'right_image': fliped_right}
+                right_image_low = self.transform(right_image_low)
+                left_image_low = self.transform(left_image_low)
+                right_image_high = self.transform(right_image_high)
+                left_image_high = self.transform(left_image_high)
+                sample = {'left_image_low': left_image_low, 'right_image_low': right_image_low ,
+                        'left_image_high' : left_image_high , 'right_image_high' : right_image_high}
         else:
-            sample = {'left_image': left_image, 'right_image': right_image}
+            sample = {'left_image_low': left_image_low, 'right_image_low': right_image_low ,
+                        'left_image_high' : left_image_high , 'right_image_high' : right_image_high}
         return sample
 
 
-class AugmentImagePair(object):
-    def __init__(self, augment_parameters, do_augmentation):
-        self.do_augmentation = do_augmentation
-        self.gamma_low = augment_parameters[0]  # 0.8
-        self.gamma_high = augment_parameters[1]  # 1.2
-        self.brightness_low = augment_parameters[2]  # 0.5
-        self.brightness_high = augment_parameters[3]  # 2.0
-        self.color_low = augment_parameters[4]  # 0.8
-        self.color_high = augment_parameters[5]  # 1.2
+# class AugmentImagePair(object):
+#     def __init__(self, augment_parameters, do_augmentation):
+#         self.do_augmentation = do_augmentation
+#         self.gamma_low = augment_parameters[0]  # 0.8
+#         self.gamma_high = augment_parameters[1]  # 1.2
+#         self.brightness_low = augment_parameters[2]  # 0.5
+#         self.brightness_high = augment_parameters[3]  # 2.0
+#         self.color_low = augment_parameters[4]  # 0.8
+#         self.color_high = augment_parameters[5]  # 1.2
 
-    def __call__(self, sample):
-        left_image = sample['left_image']
-        right_image = sample['right_image']
-        p = np.random.uniform(0, 1, 1)
-        if self.do_augmentation:
-            if p > 0.5:
-                # randomly shift gamma
-                random_gamma = np.random.uniform(self.gamma_low, self.gamma_high)
-                left_image_aug = left_image ** random_gamma
-                right_image_aug = right_image ** random_gamma
+#     def __call__(self, sample):
+#         left_image = sample['left_image_low']
+#         right_image = sample['right_image_low']
+#         p = np.random.uniform(0, 1, 1)
+#         if self.do_augmentation:
+#             if p > 0.5:
+#                 # randomly shift gamma
+#                 random_gamma = np.random.uniform(self.gamma_low, self.gamma_high)
+#                 left_image_aug = left_image ** random_gamma
+#                 right_image_aug = right_image ** random_gamma
 
-                # randomly shift brightness
-                random_brightness = np.random.uniform(self.brightness_low, self.brightness_high)
-                left_image_aug = left_image_aug * random_brightness
-                right_image_aug = right_image_aug * random_brightness
+#                 # randomly shift brightness
+#                 random_brightness = np.random.uniform(self.brightness_low, self.brightness_high)
+#                 left_image_aug = left_image_aug * random_brightness
+#                 right_image_aug = right_image_aug * random_brightness
 
-                # randomly shift color
-                random_colors = np.random.uniform(self.color_low, self.color_high, 3)
-                for i in range(3):
-                    left_image_aug[i, :, :] *= random_colors[i]
-                    right_image_aug[i, :, :] *= random_colors[i]
+#                 # randomly shift color
+#                 random_colors = np.random.uniform(self.color_low, self.color_high, 3)
+#                 for i in range(3):
+#                     left_image_aug[i, :, :] *= random_colors[i]
+#                     right_image_aug[i, :, :] *= random_colors[i]
 
-                # saturate
-                left_image_aug = torch.clamp(left_image_aug, 0, 1)
-                right_image_aug = torch.clamp(right_image_aug, 0, 1)
+#                 # saturate
+#                 left_image_aug = torch.clamp(left_image_aug, 0, 1)
+#                 right_image_aug = torch.clamp(right_image_aug, 0, 1)
 
-                sample = {'left_image': left_image_aug, 'right_image': right_image_aug}
+#                 sample = {'left_image': left_image_aug, 'right_image': right_image_aug}
 
-        else:
-            sample = {'left_image': left_image, 'right_image': right_image}
-        return sample
+#         else:
+#             sample = {'left_image': left_image, 'right_image': right_image}
+#         return sample

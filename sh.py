@@ -31,12 +31,11 @@ class KittiLoader(Dataset):
             self.right_paths_high = sorted(self.right_paths_high)#[:64]
 
         if mode == "val" or mode == "test:":
-            
-            self.left_paths_low = []
-            self.right_paths_low = []
-            self.left_paths_high = []
-            self.right_paths_high = []
-            
+
+            self.left_paths = []
+            self.right_paths = []
+            self.gt_paths = []
+
             
             left_dir_low = os.path.join(root_dir,"left_low")
             self.left_paths_low.extend([os.path.join(left_dir_low, fname) for fname in os.listdir(left_dir_low)])
@@ -50,11 +49,12 @@ class KittiLoader(Dataset):
             right_dir_high = os.path.join(root_dir,"right_high")
             self.right_paths_high.extend([os.path.join(right_dir_high, fname) for fname in os.listdir(right_dir_high)])
 
-            self.left_paths_low = sorted(self.left_paths_low)[:200]
-            self.right_paths_low = sorted(self.right_paths_low)[:200]
-            self.left_paths_high = sorted(self.left_paths_high)[:200]
-            self.right_paths_high = sorted(self.right_paths_high)[:200]
-           
+            self.left_paths_low = sorted(self.left_paths_low)#[:64]
+            self.right_paths_low = sorted(self.right_paths_low)#[:64]
+            self.left_paths_high = sorted(self.left_paths_high)#[:64]
+            self.right_paths_high = sorted(self.right_paths_high)#[:64]
+            assert len(self.right_paths) == len(self.left_paths)
+
         self.transform = transform
         self.mode = mode
 
@@ -121,14 +121,11 @@ def SSIM(x, y):
 
         return torch.mean(torch.clamp((1 - SSIM) / 2, 0, 1))
 
-L1_loss = torch.nn.SmoothL1Loss()
-
-
 
 if __name__ == "__main__":
     import sys
-    # train_dir  = "/media/shreyas/low_light_kitti2015/"
     train_dir  = "/media/shreyas/low_light"
+    #train_dir  = "/media/shreyas/low_light_kitti2015"
     data_transform = image_transforms(
         mode="train",
         augment_parameters=[
@@ -141,7 +138,7 @@ if __name__ == "__main__":
         ],
         do_augmentation=True,
         size = (256,512))
-    ds = KittiLoader(train_dir,transform = data_transform)
+    ds = KittiLoader(train_dir,transform = data_transform )
     loader = DataLoader(ds, batch_size= 4,
                             shuffle=True, num_workers= 2,
                             pin_memory=True)
@@ -150,10 +147,8 @@ if __name__ == "__main__":
         #print(data["ground_truth"].size)
         inp = data["left_image_low"]
         out = data["right_image_high"]
-        print(SSIM(inp,out))
-        print(L1_loss(inp,out))
-        print(inp)
-        print(out)
+        #print(inp[:,0,:,:].shape,out[:,0,:,:].shape)
+        print(SSIM(inp[:,0,:,:],out[:,0,:,:]))
         sys.exit()
     #print(loader.right_paths[:5])
     #print(loader.gt_paths[:5])

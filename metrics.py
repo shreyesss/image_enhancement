@@ -1,3 +1,5 @@
+import torch
+import torch.nn as nn
 import numpy as np
 #import pandas as pd
 import os
@@ -65,43 +67,60 @@ def convert_disps_to_depths_kitti(gt_disparities, pred_disparities):
     return gt_depth, pred_depth, pred_disparities_resized
 
 
+def get_PSNR(pred,out):
+    mse = torch.mean((pred - out) ** 2)
+    if(mse == 0):  # MSE is zero means no noise is present in the signal .
+                  # Therefore PSNR have no importance.
+        return 100
+    max_pixel = 1.0
+    psnr = 20 * torch.log10(max_pixel / torch.sqrt(mse))
+    return psnr
 
-def compute_metrics(disp,gt):
+def get_SSIM(x,y):
+        C1 = 0.01 ** 2
+        C2 = 0.03 ** 2
 
-    N,C,H,W = disp.shape
+        mu_x = nn.AvgPool2d(3, 1)(x)
+        mu_y = nn.AvgPool2d(3, 1)(y)
+        mu_x_mu_y = mu_x * mu_y
+        mu_x_sq = mu_x.pow(2)
+        mu_y_sq = mu_y.pow(2)
+
+        sigma_x = nn.AvgPool2d(3, 1)(x * x) - mu_x_sq
+        sigma_y = nn.AvgPool2d(3, 1)(y * y) - mu_y_sq
+        sigma_xy = nn.AvgPool2d(3, 1)(x * y) - mu_x_mu_y
+
+        SSIM_n = (2 * mu_x_mu_y + C1) * (2 * sigma_xy + C2)
+        SSIM_d = (mu_x_sq + mu_y_sq + C1) * (sigma_x + sigma_y + C2)
+        SSIM = SSIM_n / SSIM_d
+
+        return torch.mean(torch.clamp((1 - SSIM) / 2, 0, 1))
+
+
+
+
+def compute_metrics(pred,out):
+
+    N,C,H,W = pred.shape
     metrics = {}
-    metrics["d1_all"] = 0
-    metrics["abs_rel"] = 0
-    metrics["sq_rel"] = 0
-    metrics["rms"] = 0 
-    metrics["log_rms"] = 0
-    metrics["a1"] = 0
-    metrics["a2"] = 0
-    metrics["a3"] = 0
-    metrics["N"] = 0
+    metrics["PSNR"] = 0
+    metrics["SSIM"] = 0
     for  i in range(N):
         #print(gt.shape)
         # print(disp.shape)
         # print(gt[i,0,:].shape)
-        pred_disp = disp[i,0,:,:]
-        gt_disp = gt[i,0,:,:]
+        pred_left = pred[i,:3,:,:]
+        gt_left = out[i,:3,:,:]
+        pred_right = pred[i,3:,:,:]
+        gt_right = out[i,3:,:,:]
 
-        gt_depth, pred_depth, pred_disparities_resized = convert_disps_to_depths_kitti(gt_disp,pred_disp)
+        PSNR = 0.5 * (get_PSNR(pred_left,gt_left)  + get_PSNR(pred_right,gt_right))
+        SSIM = 0.5* (get_SSIM(pred_left,gt_left) + get_SSIM(pred_right,gt_right))
 
-        mask = gt_disp > 0
-        pred_disp = pred_disparities_resized
-
-        disp_diff = np.abs(gt_disp[mask] - pred_disp[mask])
-        bad_pixels = np.logical_and(disp_diff >= 3, (disp_diff / gt_disp[mask]) >= 0.05)
-        metrics["d1_all"] = metrics["d1_all"] +  100.0 * bad_pixels.sum() / mask.sum()
-        mets = compute_errors(gt_depth[mask], pred_depth[mask])
-        metrics["abs_rel"] = metrics["abs_rel"] + mets[0]
-        metrics["sq_rel"]  = metrics["sq_rel"]  + mets[1]
-        metrics["rms"] = metrics["rms"] + mets[2]
-        metrics["log_rms"] = metrics["log_rms"] + mets[3]
-        metrics["a1"] = metrics["a1"] + mets[4]
-        metrics["a2"] = metrics["a2"] + mets[5]
-        metrics["a3"] = metrics["a3"] + mets[6]
+    
+        metrics["PSNR"] += PSNR
+        metrics["SSIM"] += SSIM
+       
 
     metrics["N"]= N
     return metrics
