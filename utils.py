@@ -2,11 +2,15 @@ import torch
 import collections
 import os
 from torch.utils.data import DataLoader, ConcatDataset
+import torchvision.utils as vutils
 
 
 from models_resnet import Resnet18_md, Resnet50_md, ResnetModel
+from sid_model import SeeInDark
 from new_dataloader import KittiLoader
 from transforms import image_transforms
+
+import numpy as np
 
 def to_device(input, device):
     if torch.is_tensor(input):
@@ -21,13 +25,8 @@ def to_device(input, device):
         raise TypeError(f"Input must contain tensor, dict or list, found {type(input)}")
 
 
-def get_model(model, input_channels=3, pretrained=False):
-    if model == 'resnet50_md':
-        out_model = Resnet50_md(input_channels)
-    elif model == 'resnet18_md':
-        out_model = Resnet18_md(input_channels)
-    else:
-        out_model = ResnetModel(input_channels, encoder=model, pretrained=pretrained)
+def get_model(input_channels=6):
+    out_model = SeeInDark(input_channels)
     return out_model
 
 
@@ -58,3 +57,42 @@ def prepare_dataloader(data_directory, mode, augment_parameters,
     return n_img, loader
 
 #if __name
+
+
+def save_images(logger, mode_tag, images_dict, global_step):
+    images_dict = tensor2numpy(images_dict)
+    for tag, values in images_dict.items():
+        if not isinstance(values, list) and not isinstance(values, tuple):
+            values = [values]
+        for idx, value in enumerate(values):
+            if len(value.shape) == 3:
+                value = value[:, np.newaxis, :, :]
+            value = value[:1]
+            value = torch.from_numpy(value)
+
+            image_name = '{}/{}'.format(mode_tag, tag)
+            if len(values) > 1:
+                image_name = image_name + "_" + str(idx)
+            logger.add_image(image_name, vutils.make_grid(value, padding=0, nrow=1, normalize=True, scale_each=True),
+                             global_step)
+
+def make_iterative_func(func):
+    def wrapper(vars):
+        if isinstance(vars, list):
+            return [wrapper(x) for x in vars]
+        elif isinstance(vars, tuple):
+            return tuple([wrapper(x) for x in vars])
+        elif isinstance(vars, dict):
+            return {k: wrapper(v) for k, v in vars.items()}
+        else:
+            return func(vars)
+
+    return wrapper
+@make_iterative_func
+def tensor2numpy(vars):
+    if isinstance(vars, np.ndarray):
+        return vars
+    elif isinstance(vars, torch.Tensor):
+        return vars.data.cpu().numpy()
+    else:
+        raise NotImplementedError("invalid input type for tensor2numpy")

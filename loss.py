@@ -6,9 +6,9 @@ import torch.nn.functional as F
 class MonodepthLoss(nn.modules.Module):
     def __init__(self, SSIM_w=0.1, L1_weight = 0.9,do_stereo=True):
         super(MonodepthLoss, self).__init__()
-        self.SSIM_w = SSIM_w
+        #self.SSIM_w = SSIM_w
         self.L1_weight = L1_weight
-        self.L1_loss = torch.nn.SmoothL1Loss()
+        #self.L1_loss = torch.nn.SmoothL1Loss()
         self.do_stereo = do_stereo
 
 
@@ -33,26 +33,20 @@ class MonodepthLoss(nn.modules.Module):
         return torch.mean(torch.clamp((1 - SSIM) / 2, 0, 1))
 
 
+    def L1_loss(self,x,y):
+        return torch.abs(x-y).mean()
+
     def forward(self, inputs,outputs):
         """
         Args:
             input [disp1, disp2, disp3, disp4]
+    
           
         Return:
             (float): The loss
         """
-        if self.do_stereo == True :
-           
-            img_left = inputs[:,:3,:,:]
-            img_right = inputs[:,3:,:,:]
-            gt_left = outputs[:,:3,:,:]
-            gt_right = outputs[:,3:,:,:]
-            ssim_loss = 0.5 * (self.SSIM(img_left,gt_left) + self.SSIM(img_right,gt_right))
-            L1_loss = 0.5 * (self.L1_loss(img_left,gt_left) + self.L1_loss(img_right,gt_right))
-            loss = 0.9 * L1_loss + 0.1 * ssim_loss
-        else :
-            ssim_loss = self.SSIM(inputs,outputs)
-            L1_loss = self.L1_loss(inputs,outputs)
-            loss = 0.9 * L1_loss + 0.1 * ssim_loss
-
+        img_left = inputs[:,:3,:,:]
+        gt_left = outputs
+        loss = self.L1_loss(img_left,gt_left)
+         
         return loss

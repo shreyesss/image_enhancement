@@ -50,10 +50,10 @@ class KittiLoader(Dataset):
             right_dir_high = os.path.join(root_dir,"right_high")
             self.right_paths_high.extend([os.path.join(right_dir_high, fname) for fname in os.listdir(right_dir_high)])
 
-            self.left_paths_low = sorted(self.left_paths_low)[:200]
-            self.right_paths_low = sorted(self.right_paths_low)[:200]
-            self.left_paths_high = sorted(self.left_paths_high)[:200]
-            self.right_paths_high = sorted(self.right_paths_high)[:200]
+            self.left_paths_low = sorted(self.left_paths_low)[:100]
+            self.right_paths_low = sorted(self.right_paths_low)[:100]
+            self.left_paths_high = sorted(self.left_paths_high)[:100]
+            self.right_paths_high = sorted(self.right_paths_high)[:100]
            
         self.transform = transform
         self.mode = mode
@@ -150,6 +150,7 @@ if __name__ == "__main__":
         #print(data["ground_truth"].size)
         inp = data["left_image_low"]
         out = data["right_image_high"]
+        print(inp)
         print(SSIM(inp,out))
         print(L1_loss(inp,out))
         print(inp)

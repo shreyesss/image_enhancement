@@ -94,7 +94,7 @@ def get_SSIM(x,y):
         SSIM_d = (mu_x_sq + mu_y_sq + C1) * (sigma_x + sigma_y + C2)
         SSIM = SSIM_n / SSIM_d
 
-        return torch.mean(torch.clamp((1 - SSIM) / 2, 0, 1))
+        return torch.mean(torch.clamp(SSIM, 0, 1))
 
 
 

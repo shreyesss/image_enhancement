@@ -131,8 +131,12 @@ class get_disp(nn.Module):
         p = 1
         p2d = (p, p, p, p)
         x = self.conv1(F.pad(x, p2d))
-        x = self.normalize(x)
-        return 0.3 * self.sigmoid(x)
+        #x = self.normalize(x)
+        return  self.lrelu(x)
+
+    def lrelu(self, x):
+        outt = torch.max(0.2*x, x)
+        return outt
 
 
 class Resnet50_md(nn.Module):
@@ -358,19 +362,19 @@ class ResnetModel(nn.Module):
 
         self.upconv4 = upconv(256, 128, 3, 2)
         self.iconv4 = conv(filters[0] + 128, 128, 3, 1)
-        self.disp4_layer = get_disp(128)
+        #self.disp4_layer = get_disp(128)
 
         self.upconv3 = upconv(128, 64, 3, 1) #
         self.iconv3 = conv(64 + 64 + 6, 64, 3, 1)
-        self.disp3_layer = get_disp(64)
+        #self.disp3_layer = get_disp(64)
 
         self.upconv2 = upconv(64, 32, 3, 2)
         self.iconv2 = conv(64 + 32 + 6, 32, 3, 1)
-        self.disp2_layer = get_disp(32)
+        #self.disp2_layer = get_disp(32)
 
         self.upconv1 = upconv(32, 16, 3, 2)
         self.iconv1 = conv(16 + 6, 16, 3, 1)
-        self.disp1_layer = get_disp(16)
+        #self.disp1_layer = get_disp(16)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -405,24 +409,28 @@ class ResnetModel(nn.Module):
         upconv4 = self.upconv4(iconv5)
         concat4 = torch.cat((upconv4, skip3), 1)
         iconv4 = self.iconv4(concat4)
-        self.disp4 = self.disp4_layer(iconv4)
-        self.udisp4 = nn.functional.interpolate(self.disp4, scale_factor=1, mode='bilinear', align_corners=True)
-        self.disp4 = nn.functional.interpolate(self.disp4, scale_factor=0.5, mode='bilinear', align_corners=True)
+        #self.disp4 = self.disp4_layer(iconv4)
+        #self.udisp4 = nn.functional.interpolate(self.disp4, scale_factor=1, mode='bilinear', align_corners=True)
+        #self.disp4 = nn.functional.interpolate(self.disp4, scale_factor=0.5, mode='bilinear', align_corners=True)
 
         upconv3 = self.upconv3(iconv4)
         concat3 = torch.cat((upconv3, skip2, self.udisp4), 1)
         iconv3 = self.iconv3(concat3)
-        self.disp3 = self.disp3_layer(iconv3)
-        self.udisp3 = nn.functional.interpolate(self.disp3, scale_factor=2, mode='bilinear', align_corners=True)
+        #self.disp3 = self.disp3_layer(iconv3)
+        #self.udisp3 = nn.functional.interpolate(self.disp3, scale_factor=2, mode='bilinear', align_corners=True)
 
         upconv2 = self.upconv2(iconv3)
         concat2 = torch.cat((upconv2, skip1, self.udisp3), 1)
         iconv2 = self.iconv2(concat2)
-        self.disp2 = self.disp2_layer(iconv2)
-        self.udisp2 = nn.functional.interpolate(self.disp2, scale_factor=2, mode='bilinear', align_corners=True)
+        #self.disp2 = self.disp2_layer(iconv2)
+        #self.udisp2 = nn.functional.interpolate(self.disp2, scale_factor=2, mode='bilinear', align_corners=True)
 
         upconv1 = self.upconv1(iconv2)
         concat1 = torch.cat((upconv1, self.udisp2), 1)
         iconv1 = self.iconv1(concat1)
-        self.disp1 = self.disp1_layer(iconv1)
+        #self.disp1 = self.disp1_layer(iconv1)
         return self.disp1 #, self.disp2, self.disp3, self.disp4
+
+    def lrelu(self, x):
+        outt = torch.max(0.2*x, x)
+        return outt

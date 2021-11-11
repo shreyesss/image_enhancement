@@ -8,7 +8,7 @@ import gc
 # custom modules
 
 from loss import MonodepthLoss
-from utils import get_model, to_device, prepare_dataloader
+from utils import get_model, to_device, prepare_dataloader,save_images
 from metrics import compute_metrics
 # plot params
 
@@ -54,7 +54,7 @@ def return_arguments():
                         )
     parser.add_argument('--mode', default='train',
                         help='mode: train or test (default: train)')
-    parser.add_argument('--epochs', default=50,
+    parser.add_argument('--epochs', default=200,
                         help='number of total epochs to run')
     parser.add_argument('--learning_rate', default=1e-4,
                         help='initial learning rate (default: 1e-4)')
@@ -92,7 +92,7 @@ def return_arguments():
     parser.add_argument('--num_workers', default=2,
                         help='Number of workers in dataloader')
                         
-    parser.add_argument('--logdir', default="./checkpoints/image_enhancement",
+    parser.add_argument('--logdir', default="./checkpoints/image_enhancement_stereo",
                         help='tensorboard directory logs')
     parser.add_argument('--use_multiple_gpu', default=False)
     parser.add_argument('--do_stereo', default=True)
@@ -104,10 +104,9 @@ def adjust_learning_rate(optimizer, epoch, learning_rate):
     """Sets the learning rate to the initial LR\
         decayed by 2 every 10 epochs after 30 epoches"""
 
-    if epoch >= 30 and epoch < 40:
-        lr = learning_rate / 2
-    elif epoch >= 40:
-        lr = learning_rate / 4
+    
+    if epoch >= 100:
+        lr = learning_rate / 10
     else:
         lr = learning_rate
     for param_group in optimizer.param_groups:
@@ -136,7 +135,10 @@ class Model:
         self.logger = SummaryWriter(args.logdir)
         # Set up model
         self.device = args.device
-        self.model = get_model(args.model, input_channels=args.input_channels, pretrained=args.pretrained)
+        if self.args.do_stereo:
+            self.model = get_model(input_channels=6)
+        else:
+            self.model = get_model(input_channels=3)
         self.model = self.model.to(self.device)
         if args.use_multiple_gpu:
             self.model = torch.nn.DataParallel(self.model)
@@ -190,12 +192,15 @@ class Model:
             c_time = time.time()
             running_loss = 0.0
             self.model.train()
+            
             for batch_idx, data in enumerate(self.loader):
+                print("train batch number in epoch",batch_idx)
                 global_step = epoch * len(self.loader) + batch_idx
                 # Load data
                 data = to_device(data, self.device)
                 left = data['left_image_low']
                 right = data['right_image_low']
+                gt_left = data['left_image_high']
                 # print(left.shape)
 
                 # One optimization iteration
@@ -206,11 +211,11 @@ class Model:
                 else:
                     input_ = left 
                 outputs = self.model(input_)
-                loss = self.loss_function(input_,outputs)
+                loss = self.loss_function(gt_left,outputs)
                 loss.backward()
                 self.optimizer.step()
                 losses.append(loss.item())
-                print("loss this batch:", loss.item())
+                # print("loss this batch:", loss.item())
                 running_loss += loss.item()
 
                 del data
@@ -230,22 +235,26 @@ class Model:
             running_metrics["N"] = 0
             with torch.no_grad():
                 self.model.eval()
+                i = 0 
                 for data in self.val_loader:
+                    i = i + 1
                     data = to_device(data, self.device)
                     left = data['left_image_low']
-                    right = data['right_image_low']
+                    # right = data['right_image_low']
                     gt_left = data['left_image_high']
-                    gt_right = data['left_image_high']
+                    # gt_right = data['left_image_high']
                     if self.args.do_stereo == True:
                         input_ = torch.cat((left,right),dim=1)
-                        gt_ = torch.cat((gt_left,gt_right),dim=1)
+                        gt_ = gt_left
                     else:
                         input_ = left 
                     outputs = self.model(input_)
-                    loss = self.loss_function(input_,outputs)
+                    loss = self.loss_function(gt_,outputs)
                     metrics = compute_metrics(outputs,gt_)
                     val_losses.append(loss.item())
                     running_val_loss += loss.item()
+                    image_outputs = {"left_inp":left,"right_inp":right,"left_pred":outputs[:,:3],"left_gt": gt_left}
+                    save_images(self.logger,"image_outputs",image_outputs,i)
                     for key,val in enumerate(metrics):
                         #print(key,val)
                         running_metrics[val] = running_metrics[val] + metrics[val]
@@ -263,18 +272,22 @@ class Model:
 
                 running_loss /= self.n_img / self.args.batch_size
                 self.logger.add_scalar("Avg_epoch_loss/train_epoch", running_loss, epoch)
-                print(outputs.shape)
-                print(left.shape)
-                print(right.shape)
+                # print(outputs.shape)
+                # print(left.shape)
+                # print(right.shape)
                 
-                self.logger.add_image("Visuals/left_gt" , gt_left[0] , epoch)
-                self.logger.add_image("Visuals/right_gt" , gt_right[0] , epoch)
-                self.logger.add_image("Visuals/left" , outputs[0,:3] , epoch)
-                self.logger.add_image("Visuals/right" , outputs[0,3:] , epoch)
-                self.logger.add_image("Visuals2/left_gt" , gt_left[1] , epoch)
-                self.logger.add_image("Visuals2/right_gt" , gt_right[1] , epoch)
-                self.logger.add_image("Visuals2/left" , outputs[1,:3] , epoch)
-                self.logger.add_image("Visuals2/right" , outputs[1,3:] , epoch)
+                # self.logger.add_image("Visuals/left_gt" , gt_left , epoch)
+                # self.logger.add_image("Visuals/right_gt" , gt_right , epoch)
+                # self.logger.add_image("Visuals/left_input" , left , epoch)
+                # self.logger.add_image("Visuals/right_input" , right , epoch)
+                # self.logger.add_image("Visuals/left_pred" , outputs[:,:3] , epoch)
+                # self.logger.add_image("Visuals/right_pred" , outputs[:,3:] , epoch)
+                # self.logger.add_image("Visuals2/left_gt" , gt_left , epoch)
+                # self.logger.add_image("Visuals2/right_gt" , gt_right , epoch)
+                # self.logger.add_image("Visuals2/left_pred" , outputs[:,:3] , epoch)
+                # self.logger.add_image("Visuals2/right_pred" , outputs[:,3:] , epoch)
+                # self.logger.add_image("Visuals2/left_input" , left , epoch)
+                # self.logger.add_image("Visuals2/right_input" , right , epoch)
                 print (
                     'Epoch:',
                     epoch + 1,
