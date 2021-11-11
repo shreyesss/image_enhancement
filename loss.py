@@ -36,7 +36,7 @@ class MonodepthLoss(nn.modules.Module):
     def L1_loss(self,x,y):
         return torch.abs(x-y).mean()
 
-    def forward(self, inputs,outputs):
+    def forward(self, gt_,outputs):
         """
         Args:
             input [disp1, disp2, disp3, disp4]
@@ -45,8 +45,8 @@ class MonodepthLoss(nn.modules.Module):
         Return:
             (float): The loss
         """
-        img_left = inputs[:,:3,:,:]
-        gt_left = outputs
-        loss = self.L1_loss(img_left,gt_left)
+        img_left = gt_
+        pred_left = outputs
+        loss = self.L1_loss(img_left,pred_left)
          
         return loss
